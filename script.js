@@ -1,9 +1,8 @@
 const { Deck, GeoJsonLayer, _GlobeView } = deck;
 
-const DATA_URL = "./countries_external.geojson?v=1";
+const DATA_URL = "./countries_external.geojson?v=3";
 
-let mode = "projects"; // "projects" | "amount"
-let scope = "all";     // "all" | "hydro" | "nexsom" | "urba"
+let scope = "all"; // "all" | "hydro" | "nexsom" | "urba"
 
 let hoveredName = null;
 let deckgl = null;
@@ -18,76 +17,34 @@ let currentViewState = {
 
 let geoFeatures = [];
 let countriesFeatureCollection = null;
-let amountBreaks = [0, 0, 0, 0, 0];
+let geoMetadata = null;
 
-const PALETTE_BLUE = {
-  project: [
-    { label: "0", color: [232, 238, 244, 255] },
-    { label: "1", color: [210, 225, 242, 255] },
-    { label: "2–3", color: [166, 198, 232, 255] },
-    { label: "4–5", color: [119, 168, 218, 255] },
-    { label: "6–10", color: [66, 127, 194, 255] },
-    { label: "10+", color: [10, 77, 156, 255] }
-  ],
-  amount: [
-    [232, 238, 244, 255],
-    [210, 225, 242, 255],
-    [166, 198, 232, 255],
-    [119, 168, 218, 255],
-    [66, 127, 194, 255],
-    [10, 77, 156, 255]
-  ],
-  presence: {
-    no: [232, 238, 244, 255],
-    yes: [31, 111, 191, 255]
-  }
-};
+const PALETTE_BLUE = [
+  { label: "0", color: [232, 238, 244, 255] },
+  { label: "1", color: [210, 225, 242, 255] },
+  { label: "2–3", color: [166, 198, 232, 255] },
+  { label: "4–5", color: [119, 168, 218, 255] },
+  { label: "6–10", color: [66, 127, 194, 255] },
+  { label: "10+", color: [10, 77, 156, 255] }
+];
 
-const PALETTE_ORANGE = {
-  project: [
-    { label: "0", color: [242, 238, 232, 255] },
-    { label: "1", color: [253, 224, 178, 255] },
-    { label: "2–3", color: [253, 187, 99, 255] },
-    { label: "4–5", color: [240, 134, 28, 255] },
-    { label: "6–10", color: [210, 82, 8, 255] },
-    { label: "10+", color: [155, 45, 2, 255] }
-  ],
-  amount: [
-    [242, 238, 232, 255],
-    [253, 224, 178, 255],
-    [253, 187, 99, 255],
-    [240, 134, 28, 255],
-    [210, 82, 8, 255],
-    [155, 45, 2, 255]
-  ],
-  presence: {
-    no: [242, 238, 232, 255],
-    yes: [214, 106, 18, 255]
-  }
-};
+const PALETTE_ORANGE = [
+  { label: "0", color: [242, 238, 232, 255] },
+  { label: "1", color: [253, 224, 178, 255] },
+  { label: "2–3", color: [253, 187, 99, 255] },
+  { label: "4–5", color: [240, 134, 28, 255] },
+  { label: "6–10", color: [210, 82, 8, 255] },
+  { label: "10+", color: [155, 45, 2, 255] }
+];
 
-const PALETTE_GREEN = {
-  project: [
-    { label: "0", color: [235, 242, 236, 255] },
-    { label: "1", color: [198, 239, 210, 255] },
-    { label: "2–3", color: [129, 204, 155, 255] },
-    { label: "4–5", color: [65, 171, 103, 255] },
-    { label: "6–10", color: [30, 130, 65, 255] },
-    { label: "10+", color: [10, 85, 35, 255] }
-  ],
-  amount: [
-    [235, 242, 236, 255],
-    [198, 239, 210, 255],
-    [129, 204, 155, 255],
-    [65, 171, 103, 255],
-    [30, 130, 65, 255],
-    [10, 85, 35, 255]
-  ],
-  presence: {
-    no: [235, 242, 236, 255],
-    yes: [25, 133, 67, 255]
-  }
-};
+const PALETTE_GREEN = [
+  { label: "0", color: [235, 242, 236, 255] },
+  { label: "1", color: [198, 239, 210, 255] },
+  { label: "2–3", color: [129, 204, 155, 255] },
+  { label: "4–5", color: [65, 171, 103, 255] },
+  { label: "6–10", color: [30, 130, 65, 255] },
+  { label: "10+", color: [10, 85, 35, 255] }
+];
 
 function getActivePalette() {
   if (scope === "urba") return PALETTE_ORANGE;
@@ -107,13 +64,6 @@ function amountShort(n) {
   return numberFmt(v) + " EUR";
 }
 
-function computeAmountBreaks(values) {
-  const arr = values.filter(v => v > 0).sort((a, b) => a - b);
-  if (!arr.length) return [0, 0, 0, 0, 0];
-  const q = p => arr[Math.min(arr.length - 1, Math.floor((arr.length - 1) * p))];
-  return [q(0.2), q(0.4), q(0.6), q(0.8), q(0.95)];
-}
-
 function getScopePresence(props) {
   if (scope === "all") return Number(props.has_any_project || 0);
   if (scope === "hydro") return Number(props.has_hydroconseil || 0);
@@ -122,24 +72,15 @@ function getScopePresence(props) {
   return 0;
 }
 
-function getScopeProjectValue(props) {
+function getProjectValue(props) {
   if (scope === "all") {
     return Number(props.project_count || 0);
   }
-
   return getScopePresence(props) ? Number(props.project_count || 0) : 0;
 }
 
-function getScopeAmountValue(props) {
-  if (scope === "all") {
-    return Number(props.amount_total || 0);
-  }
-
-  return getScopePresence(props) ? Number(props.amount_total || 0) : 0;
-}
-
 function getProjectColor(v) {
-  const palette = getActivePalette().project;
+  const palette = getActivePalette();
   if (!v || v <= 0) return palette[0].color;
   if (v <= 1) return palette[1].color;
   if (v <= 3) return palette[2].color;
@@ -148,25 +89,10 @@ function getProjectColor(v) {
   return palette[5].color;
 }
 
-function getAmountColor(v) {
-  const palette = getActivePalette().amount;
-  if (!v || v <= 0) return palette[0];
-  if (v <= amountBreaks[0]) return palette[1];
-  if (v <= amountBreaks[1]) return palette[2];
-  if (v <= amountBreaks[2]) return palette[3];
-  if (v <= amountBreaks[3]) return palette[4];
-  return palette[5];
-}
-
 function getFillColor(props) {
   const isHovered = hoveredName && props.country_name === hoveredName;
-  let color;
-
-  if (mode === "projects") {
-    color = getProjectColor(getScopeProjectValue(props));
-  } else {
-    color = getAmountColor(getScopeAmountValue(props));
-  }
+  const value = getProjectValue(props);
+  const color = getProjectColor(value);
 
   if (isHovered) {
     return [
@@ -205,7 +131,10 @@ function makeEarthLayer() {
     extruded: false,
     pickable: false,
     getFillColor: [255, 255, 255, 255],
-    parameters: { depthTest: true, cullFace: "back" }
+    parameters: {
+      depthTest: true,
+      cullFace: "back"
+    }
   });
 }
 
@@ -220,9 +149,12 @@ function makeCountriesFillLayer() {
     pickable: true,
     autoHighlight: false,
     getFillColor: f => getFillColor(f.properties),
-    parameters: { depthTest: true, cullFace: "back" },
+    parameters: {
+      depthTest: true,
+      cullFace: "back"
+    },
     updateTriggers: {
-      getFillColor: [mode, scope, hoveredName, amountBreaks.join("-")]
+      getFillColor: [scope, hoveredName]
     },
     onHover: info => {
       const newHovered = info.object ? info.object.properties.country_name : null;
@@ -253,7 +185,10 @@ function makeCountriesBorderLayer() {
     },
     lineWidthUnits: "pixels",
     lineWidthMinPixels: 0.45,
-    parameters: { depthTest: false, cullFace: "back" },
+    parameters: {
+      depthTest: false,
+      cullFace: "back"
+    },
     updateTriggers: {
       getLineColor: [hoveredName],
       getLineWidth: [hoveredName]
@@ -275,60 +210,60 @@ function updateLegend() {
   if (!title || !box) return;
 
   box.innerHTML = "";
+  title.textContent = "Nombre de projets";
 
   const palette = getActivePalette();
 
-  if (mode === "projects") {
-    title.textContent = "Nombre de projets";
-
-    palette.project.forEach(c => {
-      const row = document.createElement("div");
-      row.className = "legend-row";
-      row.innerHTML = `
-        <div class="legend-swatch" style="background:rgba(${c.color[0]},${c.color[1]},${c.color[2]},${c.color[3] / 255});"></div>
-        <div>${c.label}</div>
-      `;
-      box.appendChild(row);
-    });
-  } else {
-    title.textContent = "Montant cumulé";
-
-    const labels = [
-      "0",
-      `≤ ${amountShort(amountBreaks[0])}`,
-      `≤ ${amountShort(amountBreaks[1])}`,
-      `≤ ${amountShort(amountBreaks[2])}`,
-      `≤ ${amountShort(amountBreaks[3])}`,
-      `> ${amountShort(amountBreaks[3])}`
-    ];
-
-    palette.amount.forEach((c, i) => {
-      const row = document.createElement("div");
-      row.className = "legend-row";
-      row.innerHTML = `
-        <div class="legend-swatch" style="background:rgba(${c[0]},${c[1]},${c[2]},${c[3] / 255});"></div>
-        <div>${labels[i]}</div>
-      `;
-      box.appendChild(row);
-    });
-  }
+  palette.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML = `
+      <div class="legend-swatch" style="background:rgba(${c.color[0]},${c.color[1]},${c.color[2]},${c.color[3] / 255});"></div>
+      <div>${c.label}</div>
+    `;
+    box.appendChild(row);
+  });
 }
 
 function updateStatsCards() {
   let coveredCountries = 0;
-  let totalProjects = 0;
-  let totalAmount = 0;
 
   geoFeatures.forEach(f => {
     const props = f.properties;
     const presence = getScopePresence(props);
-    const projVal = getScopeProjectValue(props);
-    const amountVal = getScopeAmountValue(props);
-
     if (presence > 0) coveredCountries += 1;
-    totalProjects += projVal;
-    totalAmount += amountVal;
   });
+
+  let totalProjects = 0;
+  let totalAmount = 0;
+
+  const totals = geoMetadata?.totals_unique || null;
+
+  if (totals) {
+    if (scope === "all") {
+      totalProjects = Number(totals.projects_all || 0);
+      totalAmount = Number(totals.amount_all || 0);
+    } else if (scope === "hydro") {
+      totalProjects = Number(totals.projects_hydroconseil || 0);
+      totalAmount = Number(totals.amount_hydroconseil || 0);
+    } else if (scope === "nexsom") {
+      totalProjects = Number(totals.projects_nexsom || 0);
+      totalAmount = Number(totals.amount_nexsom || 0);
+    } else if (scope === "urba") {
+      totalProjects = Number(totals.projects_urbaconsulting || 0);
+      totalAmount = Number(totals.amount_urbaconsulting || 0);
+    }
+  } else {
+    geoFeatures.forEach(f => {
+      const props = f.properties;
+      const presence = getScopePresence(props);
+
+      if (presence > 0) {
+        totalProjects += Number(props.project_count || 0);
+        totalAmount += Number(props.amount_total || 0);
+      }
+    });
+  }
 
   const countriesEl = document.getElementById("stat-countries");
   const projectsEl = document.getElementById("stat-projects");
@@ -364,10 +299,10 @@ function updateTooltip(info) {
     <div style="font-size:12px;line-height:1.55;color:#31424f;">
       <span style="color:#5f7283;">Présence ${presenceLabel} :</span>
       <b>${presence ? "Oui" : "Non"}</b><br/>
-      <span style="color:#5f7283;">Nombre de projets :</span>
-      <b>${numberFmt(getScopeProjectValue(props))}</b><br/>
-      <span style="color:#5f7283;">Montant cumulé :</span>
-      <b>${numberFmt(Math.round(getScopeAmountValue(props)))} EUR</b>
+      <span style="color:#5f7283;">Nombre total de projets :</span>
+      <b>${numberFmt(props.project_count || 0)}</b><br/>
+      <span style="color:#5f7283;">Montant total :</span>
+      <b>${numberFmt(Math.round(props.amount_total || 0))} EUR</b>
     </div>
   `;
 
@@ -376,30 +311,18 @@ function updateTooltip(info) {
   tooltip.style.display = "block";
 }
 
-function updateDerivedValues() {
-  amountBreaks = computeAmountBreaks(
-    geoFeatures.map(f => getScopeAmountValue(f.properties))
-  );
-}
-
 function refreshMap() {
   if (!deckgl) return;
 
-  updateDerivedValues();
   updateStatsCards();
   updateLegend();
 
   deckgl.setProps({ layers: getLayers() });
 
-  const btnProjects = document.getElementById("btnProjects");
-  const btnAmount = document.getElementById("btnAmount");
   const btnScopeAll = document.getElementById("btnScopeAll");
   const btnScopeHydro = document.getElementById("btnScopeHydro");
   const btnScopeNexsom = document.getElementById("btnScopeNexsom");
   const btnScopeUrba = document.getElementById("btnScopeUrba");
-
-  if (btnProjects) btnProjects.classList.toggle("active", mode === "projects");
-  if (btnAmount) btnAmount.classList.toggle("active", mode === "amount");
 
   if (btnScopeAll) btnScopeAll.classList.toggle("active", scope === "all");
   if (btnScopeHydro) btnScopeHydro.classList.toggle("active", scope === "hydro");
@@ -431,28 +354,10 @@ function animateRotation() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  const btnProjects = document.getElementById("btnProjects");
-  const btnAmount = document.getElementById("btnAmount");
   const btnScopeAll = document.getElementById("btnScopeAll");
   const btnScopeHydro = document.getElementById("btnScopeHydro");
   const btnScopeNexsom = document.getElementById("btnScopeNexsom");
   const btnScopeUrba = document.getElementById("btnScopeUrba");
-
-  if (btnProjects) {
-    btnProjects.addEventListener("click", () => {
-      mode = "projects";
-      refreshMap();
-      pauseAutoRotate();
-    });
-  }
-
-  if (btnAmount) {
-    btnAmount.addEventListener("click", () => {
-      mode = "amount";
-      refreshMap();
-      pauseAutoRotate();
-    });
-  }
 
   if (btnScopeAll) {
     btnScopeAll.addEventListener("click", () => {
@@ -496,13 +401,13 @@ document.addEventListener("DOMContentLoaded", () => {
       return r.json();
     })
     .then(geojson => {
+      geoMetadata = geojson?.metadata || null;
+
       geoFeatures = Array.isArray(geojson?.features) ? geojson.features : [];
       countriesFeatureCollection = {
         type: "FeatureCollection",
         features: geoFeatures
       };
-
-      updateDerivedValues();
 
       deckgl = new Deck({
         parent: document.getElementById("container"),
@@ -510,6 +415,9 @@ document.addEventListener("DOMContentLoaded", () => {
         controller: true,
         viewState: currentViewState,
         layers: getLayers(),
+        parameters: {
+          clearColor: [1, 1, 1, 1]
+        },
         onViewStateChange: ({ viewState, interactionState }) => {
           currentViewState = { ...viewState };
 
